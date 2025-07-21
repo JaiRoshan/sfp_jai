@@ -1,0 +1,2 @@
+text = "okkkkk"
+print(text)
