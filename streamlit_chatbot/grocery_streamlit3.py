@@ -161,6 +161,11 @@ def update_category_stats():
 
 def get_item_category(item_name):
     """Determine which category an item belongs to"""
+    # Check if item has a stored category first
+    if 'item_categories' in st.session_state and item_name in st.session_state.item_categories:
+        return st.session_state.item_categories[item_name]
+    
+    # Otherwise, determine by keywords
     item_lower = item_name.lower()
     
     if any(grain in item_lower for grain in ['rice', 'bread', 'oats', 'flour']):
@@ -182,6 +187,17 @@ def get_item_category(item_name):
     else:
         return 'Other'
 
+def set_item_category(item_name, category):
+    """Manually set an item's category"""
+    if 'item_categories' not in st.session_state:
+        st.session_state.item_categories = {}
+    st.session_state.item_categories[item_name] = category
+
+def remove_item_from_category(item_name):
+    """Remove an item's category assignment"""
+    if 'item_categories' in st.session_state and item_name in st.session_state.item_categories:
+        del st.session_state.item_categories[item_name]
+
 def get_category_items(category):
     """Get all items in a specific category"""
     category_items = []
@@ -189,6 +205,10 @@ def get_category_items(category):
         if get_item_category(item) == category:
             category_items.append(item)
     return sorted(category_items)
+
+def move_item_to_category(item_name, new_category):
+    """Move an item to a different category"""
+    set_item_category(item_name, new_category)
 
 def export_shopping_list(total):
     """Export shopping list to HTML format (can be saved as PDF)"""
@@ -344,6 +364,9 @@ if 'purchase_history' not in st.session_state:
 
 if 'category_stats' not in st.session_state:
     st.session_state.category_stats = {}
+
+if 'item_categories' not in st.session_state:
+    st.session_state.item_categories = {}
 
 def main():
     st.title("🛒 Family Grocery List & Price Checker")
@@ -534,9 +557,10 @@ def main():
             with col3:
                 if st.button(f"Add to {selected_cat}", key=f"add_new_{selected_cat}"):
                     if new_item_name and new_item_name not in st.session_state.grocery_items:
-                        # Add item with category-specific naming if needed
+                        # Add item with category assignment
                         item_name = new_item_name.strip()
                         st.session_state.grocery_items[item_name] = new_item_price
+                        set_item_category(item_name, selected_cat)  # Explicitly assign to category
                         st.success(f"✅ Added '{item_name}' to {selected_cat} category at RM{new_item_price:.2f}")
                         st.rerun()
                     elif new_item_name in st.session_state.grocery_items:
@@ -600,15 +624,39 @@ def main():
                     
                     with col:
                         with st.container():
-                            # Item name with edit option
-                            item_col, edit_col = st.columns([3, 1])
+                            # Item name with edit and category management options
+                            item_header_col, category_col, edit_col, remove_col = st.columns([2, 1, 0.5, 0.5])
                             
-                            with item_col:
+                            with item_header_col:
                                 st.write(f"**{item}**")
+                            
+                            with category_col:
+                                current_category = get_item_category(item)
+                                new_category = st.selectbox(
+                                    "Category", 
+                                    categories, 
+                                    index=categories.index(current_category) if current_category in categories else 0,
+                                    key=f"cat_select_{item}",
+                                    help="Change item category"
+                                )
+                                if new_category != current_category:
+                                    move_item_to_category(item, new_category)
+                                    st.success(f"Moved {item} to {new_category}")
+                                    st.rerun()
                             
                             with edit_col:
                                 if st.button("✏️", key=f"edit_{item}", help="Edit item"):
                                     st.session_state[f"editing_{item}"] = True
+                            
+                            with remove_col:
+                                if st.button("🗑️", key=f"remove_from_cat_{item}", help="Remove from category"):
+                                    # Remove from grocery items and category
+                                    if item in st.session_state.shopping_cart:
+                                        del st.session_state.shopping_cart[item]
+                                    del st.session_state.grocery_items[item]
+                                    remove_item_from_category(item)
+                                    st.success(f"Removed {item} from database")
+                                    st.rerun()
                             
                             # Check if item is being edited
                             if st.session_state.get(f"editing_{item}", False):
@@ -622,6 +670,11 @@ def main():
                                             # Update item name and price
                                             del st.session_state.grocery_items[item]
                                             st.session_state.grocery_items[new_name] = new_price_edit
+                                            
+                                            # Update category assignment
+                                            if item in st.session_state.item_categories:
+                                                st.session_state.item_categories[new_name] = st.session_state.item_categories[item]
+                                                del st.session_state.item_categories[item]
                                             
                                             # Update in cart if present
                                             if item in st.session_state.shopping_cart:
@@ -676,7 +729,89 @@ def main():
                 st.info(f"No items found in {selected_cat} category. Add the first item above!")
                 
         # Category management section
-        st.subheader("🏷️ Category Management")
+        st.subheader("🏷️ Advanced Category Management")
+        
+        with st.expander("🔄 Move Items Between Categories"):
+            st.write("**Bulk Move Items:**")
+            
+            col1, col2, col3 = st.columns([1, 1, 1])
+            
+            with col1:
+                source_category = st.selectbox("From Category:", categories, key="source_cat")
+                
+            with col2:
+                target_category = st.selectbox("To Category:", categories, key="target_cat")
+            
+            with col3:
+                st.write(" ")  # Spacing
+                if st.button("🔄 Move All Items"):
+                    if source_category != target_category:
+                        source_items = get_category_items(source_category)
+                        if source_items:
+                            for item in source_items:
+                                move_item_to_category(item, target_category)
+                            st.success(f"✅ Moved {len(source_items)} items from {source_category} to {target_category}")
+                            st.rerun()
+                        else:
+                            st.info(f"No items in {source_category} to move")
+                    else:
+                        st.warning("Source and target categories must be different")
+            
+            # Individual item moving
+            st.write("**Move Individual Items:**")
+            all_items = list(st.session_state.grocery_items.keys())
+            
+            if all_items:
+                selected_item = st.selectbox("Select item to move:", all_items, key="move_item")
+                current_cat = get_item_category(selected_item)
+                
+                col1, col2, col3 = st.columns([1, 1, 1])
+                
+                with col1:
+                    st.info(f"Current: {current_cat}")
+                
+                with col2:
+                    new_cat = st.selectbox("Move to:", categories, key="new_cat_individual")
+                
+                with col3:
+                    st.write(" ")  # Spacing
+                    if st.button("🔄 Move Item"):
+                        if new_cat != current_cat:
+                            move_item_to_category(selected_item, new_cat)
+                            st.success(f"✅ Moved '{selected_item}' to {new_cat}")
+                            st.rerun()
+                        else:
+                            st.info("Item is already in that category")
+        
+        with st.expander("🗑️ Remove Items by Category"):
+            st.warning("⚠️ This will permanently delete items from the database!")
+            
+            remove_category = st.selectbox("Select category to clear:", categories, key="remove_cat")
+            items_in_remove_cat = get_category_items(remove_category)
+            
+            if items_in_remove_cat:
+                st.write(f"**Items to be removed from {remove_category}:**")
+                for item in items_in_remove_cat:
+                    price = st.session_state.grocery_items[item]
+                    st.write(f"• {item} - RM{price:.2f}")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if st.button(f"🗑️ Remove All {len(items_in_remove_cat)} Items", type="secondary"):
+                        # Remove all items from category
+                        for item in items_in_remove_cat:
+                            if item in st.session_state.shopping_cart:
+                                del st.session_state.shopping_cart[item]
+                            del st.session_state.grocery_items[item]
+                            remove_item_from_category(item)
+                        st.success(f"✅ Removed all {len(items_in_remove_cat)} items from {remove_category}")
+                        st.rerun()
+                
+                with col2:
+                    st.write("This action cannot be undone!")
+            else:
+                st.info(f"No items in {remove_category} category to remove")
         
         with st.expander("📊 Category Overview"):
             category_overview = {}
